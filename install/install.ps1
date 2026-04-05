@@ -59,7 +59,8 @@ Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $tmp
 
 try {
   $checksums = Invoke-WebRequest -UseBasicParsing -Uri $checksumUrl
-  $line = ($checksums.Content -split "`r?`n" | Where-Object { $_ -match "^[0-9a-fA-F]+\s+${([regex]::Escape($asset))}$" } | Select-Object -First 1)
+  $assetPattern = [regex]::Escape($asset)
+  $line = ($checksums.Content -split "`r?`n" | Where-Object { $_ -match "^[0-9a-fA-F]+\s+$assetPattern$" } | Select-Object -First 1)
   if (-not $line) { throw "Checksum entry not found for $asset" }
   $expected = ($line -split "\s+")[0].Trim()
   $actual = (Get-FileHash -Algorithm SHA256 -Path $tmp).Hash.ToLowerInvariant()

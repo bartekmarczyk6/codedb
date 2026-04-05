@@ -197,6 +197,12 @@ main() {
     # Verify checksum if available (#120)
     local expected_hash
     expected_hash="$(curl -fsSL -A 'codedb-installer' "$checksum_url" 2>/dev/null | grep -E "^[0-9a-fA-F]+[[:space:]]+codedb-${platform}${ext}$" | awk '{print $1}')"
+    if [ -z "$expected_hash" ]; then
+      rm -f "$tmp"
+      printf "${R}failed${N}\n"
+      printf "\n  ${R}error: checksum metadata missing for codedb-${platform}${ext}${N}\n" >&2
+      exit 1
+    fi
     if [ -n "$expected_hash" ]; then
       local actual_hash
       if command -v sha256sum >/dev/null 2>&1; then
@@ -210,6 +216,12 @@ main() {
         printf "\n  ${R}error: checksum mismatch — binary may be corrupted${N}\n" >&2
         printf "  ${D}expected: $expected_hash${N}\n" >&2
         printf "  ${D}actual:   $actual_hash${N}\n" >&2
+        exit 1
+      fi
+      if [ -z "$actual_hash" ]; then
+        rm -f "$tmp"
+        printf "${R}failed${N}\n"
+        printf "\n  ${R}error: no sha256 tool available (need sha256sum or shasum)${N}\n" >&2
         exit 1
       fi
     fi
