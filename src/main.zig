@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Store = @import("store.zig").Store;
 const AgentRegistry = @import("agent.zig").AgentRegistry;
 const Explorer = @import("explore.zig").Explorer;
@@ -12,6 +13,7 @@ const index_mod = @import("index.zig");
 const snapshot_mod = @import("snapshot.zig");
 const telemetry = @import("telemetry.zig");
 const root_policy = @import("root_policy.zig");
+const platform_paths = @import("platform_paths.zig");
 
 /// Thin wrapper: format + write to a File via allocator.
 const Out = struct {
@@ -94,10 +96,15 @@ fn mainImpl() !void {
     // Handle update command (re-runs the install script)
     if (std.mem.eql(u8, cmd, "update")) {
         out.p("updating codedb...\n", .{});
-        var child = std.process.Child.init(
-            &.{ "/bin/bash", "-c", "curl -fsSL https://codedb.codegraff.com/install.sh | bash" },
-            allocator,
-        );
+        const script_cmd = if (builtin.os.tag == .windows)
+            "iwr -useb https://codedb.codegraff.com/install.ps1 | iex"
+        else
+            "curl -fsSL https://codedb.codegraff.com/install.sh | sh";
+        const argv = if (builtin.os.tag == .windows)
+            &[_][]const u8{ "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script_cmd }
+        else
+            &[_][]const u8{ "sh", "-c", script_cmd };
+        var child = std.process.Child.init(argv, allocator);
         child.stdin_behavior = .Inherit;
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
@@ -553,12 +560,7 @@ fn resolveRoot(root: []const u8, buf: *[std.fs.max_path_bytes]u8) ![]const u8 {
 }
 
 fn getDataDir(allocator: std.mem.Allocator, abs_root: []const u8) ![]u8 {
-    const hash = std.hash.Wyhash.hash(0, abs_root);
-    const home = std.process.getEnvVarOwned(allocator, "HOME") catch {
-        return std.fmt.allocPrint(allocator, "{s}/.codedb", .{abs_root});
-    };
-    defer allocator.free(home);
-    const dir = try std.fmt.allocPrint(allocator, "{s}/.codedb/projects/{x}", .{ home, hash });
+    const dir = try platform_paths.getProjectDataDir(allocator, abs_root);
     std.fs.cwd().makePath(dir) catch |err| {
         std.log.warn("could not create data dir {s}: {}", .{ dir, err });
     };

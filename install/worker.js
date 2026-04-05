@@ -89,12 +89,12 @@ async function proxyReleaseBinary(version, assetName) {
   const release = await releaseResp.json();
 
   // Find the matching asset
-  // Asset names on GitHub: "codedb-darwin-arm64", "codedb-linux-x86_64", etc.
+  // Asset names on GitHub: "codedb-darwin-arm64", "codedb-linux-x86_64", "codedb-windows-x86_64.exe", etc.
   // If the release just has "codedb" (no platform suffix), try exact match first then bare name
   let asset = release.assets.find((a) => a.name === assetName);
   if (!asset) {
     // Fallback: if only "codedb" exists in release, map to it
-    const bare = assetName.replace(/-darwin-arm64|-darwin-x86_64|-linux-arm64|-linux-x86_64/, "");
+    const bare = assetName.replace(/-darwin-arm64|-darwin-x86_64|-linux-arm64|-linux-x86_64|-windows-x86_64\.exe|-windows-arm64\.exe/, "");
     asset = release.assets.find((a) => a.name === bare);
   }
 

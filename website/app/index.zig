@@ -248,7 +248,7 @@ const html =
     \\    </div>
     \\    <div class="feature-card">
     \\      <h3>Zero dependencies</h3>
-    \\      <p>Pure Zig. Single binary. No SQLite, no tree-sitter, no runtime. Cross-compiles to macOS + Linux.</p>
+    \\      <p>Pure Zig. Single binary. No SQLite, no tree-sitter, no runtime. Cross-compiles to macOS + Linux + Windows.</p>
     \\    </div>
     \\    <div class="feature-card">
     \\      <h3>Portable snapshots</h3>

@@ -57,7 +57,7 @@
 | Sensitive file blocking (.env, credentials, keys)      |                                          |
 | Codesigned + notarized macOS binaries                  |                                          |
 | SHA256 checksum verification in installer              |                                          |
-| Cross-platform: macOS (ARM/x86), Linux (ARM/x86)      |                                          |
+| Cross-platform: macOS (ARM/x86), Linux (ARM/x86), Windows (ARM/x86) |                              |
 
 ---
 
@@ -75,6 +75,8 @@ Downloads the binary for your platform and auto-registers codedb as an MCP serve
 | macOS x86_64 (Intel) | `codedb-darwin-x86_64` | ✅ codesigned + notarized |
 | Linux ARM64 | `codedb-linux-arm64` | — |
 | Linux x86_64 | `codedb-linux-x86_64` | — |
+| Windows ARM64 | `codedb-windows-arm64.exe` | — |
+| Windows x86_64 | `codedb-windows-x86_64.exe` | — |
 
 Or install manually from [GitHub Releases](https://github.com/justrach/codedb/releases/latest).
 
@@ -392,6 +394,8 @@ Binary: `zig-out/bin/codedb`
 zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux
 zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux
 zig build -Doptimize=ReleaseFast -Dtarget=x86_64-macos
+zig build -Doptimize=ReleaseFast -Dtarget=x86_64-windows
+zig build -Doptimize=ReleaseFast -Dtarget=aarch64-windows
 ```
 
 ### Releasing

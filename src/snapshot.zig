@@ -24,6 +24,7 @@
 const std = @import("std");
 const Explorer = @import("explore.zig").Explorer;
 const git_mod = @import("git.zig");
+const platform_paths = @import("platform_paths.zig");
 
 const MAGIC = [4]u8{ 'C', 'D', 'B', 0x01 };
 const FORMAT_VERSION: u16 = 1;
@@ -547,8 +548,9 @@ fn isSensitivePath(path: []const u8) bool {
         ".pem",
     };
 
-    // Check exact filename (basename)
-    const basename = if (std.mem.lastIndexOfScalar(u8, path, '/')) |sep| path[sep + 1 ..] else path;
+    var norm_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const norm = platform_paths.normalizeLower(path, &norm_buf);
+    const basename = if (std.mem.lastIndexOfScalar(u8, norm, '/')) |sep| norm[sep + 1 ..] else norm;
 
     for (sensitive_names) |name| {
         if (std.mem.eql(u8, basename, name)) return true;
@@ -565,9 +567,9 @@ fn isSensitivePath(path: []const u8) bool {
     if (endsWith(basename, ".jks")) return true;
 
     // Check directory patterns
-    if (std.mem.indexOf(u8, path, ".ssh/") != null) return true;
-    if (std.mem.indexOf(u8, path, ".gnupg/") != null) return true;
-    if (std.mem.indexOf(u8, path, ".aws/") != null) return true;
+    if (std.mem.indexOf(u8, norm, ".ssh/") != null) return true;
+    if (std.mem.indexOf(u8, norm, ".gnupg/") != null) return true;
+    if (std.mem.indexOf(u8, norm, ".aws/") != null) return true;
 
     return false;
 }
@@ -579,7 +581,7 @@ fn endsWith(s: []const u8, suffix: []const u8) bool {
 
 fn cleanupStaleTmpFiles(output_path: []const u8) void {
     // Derive parent directory and basename from output_path
-    const sep = std.mem.lastIndexOfScalar(u8, output_path, '/');
+    const sep = std.mem.lastIndexOfAny(u8, output_path, "/\\");
     const dir_path = if (sep) |s| output_path[0..s] else ".";
     const basename = if (sep) |s| output_path[s + 1 ..] else output_path;
 
@@ -608,13 +610,10 @@ pub fn writeSnapshotDual(
 ) !void {
     try writeSnapshot(explorer, root_path, output_path, allocator);
 
-    const hash = std.hash.Wyhash.hash(0, root_path);
-    const home = std.process.getEnvVarOwned(allocator, "HOME") catch return;
-    defer allocator.free(home);
-    const secondary = std.fmt.allocPrint(allocator, "{s}/.codedb/projects/{x}/codedb.snapshot", .{ home, hash }) catch return;
+    const secondary = platform_paths.getCentralSnapshotPath(allocator, root_path) catch return;
     defer allocator.free(secondary);
 
-    const dir_path = std.fmt.allocPrint(allocator, "{s}/.codedb/projects/{x}", .{ home, hash }) catch return;
+    const dir_path = platform_paths.getProjectDataDir(allocator, root_path) catch return;
     defer allocator.free(dir_path);
     std.fs.cwd().makePath(dir_path) catch {};
 
