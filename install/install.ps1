@@ -59,16 +59,18 @@ Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $tmp
 
 try {
   $checksums = Invoke-WebRequest -UseBasicParsing -Uri $checksumUrl
-  $line = ($checksums.Content -split "`n" | Where-Object { $_ -match [regex]::Escape($asset) } | Select-Object -First 1)
-  if ($line) {
-    $expected = ($line -split "\s+")[0].Trim()
-    $actual = (Get-FileHash -Algorithm SHA256 -Path $tmp).Hash.ToLowerInvariant()
-    if ($actual -ne $expected.ToLowerInvariant()) {
-      Remove-Item -Force $tmp -ErrorAction SilentlyContinue
-      throw "Checksum mismatch"
-    }
+  $line = ($checksums.Content -split "`r?`n" | Where-Object { $_ -match "^[0-9a-fA-F]+\s+${([regex]::Escape($asset))}$" } | Select-Object -First 1)
+  if (-not $line) { throw "Checksum entry not found for $asset" }
+  $expected = ($line -split "\s+")[0].Trim()
+  $actual = (Get-FileHash -Algorithm SHA256 -Path $tmp).Hash.ToLowerInvariant()
+  if ($actual -ne $expected.ToLowerInvariant()) {
+    Remove-Item -Force $tmp -ErrorAction SilentlyContinue
+    throw "Checksum mismatch"
   }
-} catch {}
+} catch {
+  Remove-Item -Force $tmp -ErrorAction SilentlyContinue
+  throw "Checksum verification failed: $($_.Exception.Message)"
+}
 
 Move-Item -Force $tmp $dest
 

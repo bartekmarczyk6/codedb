@@ -12,14 +12,22 @@ fn isWindowsDriveRoot(path: []const u8) bool {
     return is_alpha and path[1] == ':' and (path[2] == '/' or path[2] == '\\');
 }
 
+fn hasPathSegment(path: []const u8, segment: []const u8) bool {
+    var it = std.mem.splitScalar(u8, path, '/');
+    while (it.next()) |part| {
+        if (std.mem.eql(u8, part, segment)) return true;
+    }
+    return false;
+}
+
 pub fn isIndexableRoot(path: []const u8) bool {
     if (path.len == 0) return false;
     var norm_buf: [std.fs.max_path_bytes]u8 = undefined;
     const norm = platform_paths.normalizeLower(path, &norm_buf);
     if (isWindowsDriveRoot(norm)) return false;
     if (std.mem.startsWith(u8, norm, "//")) return false;
-    if (std.mem.indexOf(u8, norm, "/appdata/local/temp") != null) return false;
-    if (std.mem.indexOf(u8, norm, "/windows/temp") != null) return false;
+    if (hasPathSegment(norm, "appdata") and hasPathSegment(norm, "local") and hasPathSegment(norm, "temp")) return false;
+    if (hasPathSegment(norm, "windows") and hasPathSegment(norm, "temp")) return false;
 
     if (std.mem.eql(u8, norm, "/")) return false;
     if (isExactOrChild(norm, "/private/tmp")) return false;

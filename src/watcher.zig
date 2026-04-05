@@ -541,7 +541,10 @@ fn drainNotifyFile(store: *Store, explorer: *Explorer, queue: *EventQueue, known
     // Clear after reading
     if (std.fs.cwd().createFile(notify_path, .{ .truncate = true })) |empty| {
         empty.close();
-    } else |_| return;
+    } else |err| {
+        std.log.warn("watcher: failed to truncate notify file {s}: {}", .{ notify_path, err });
+        return;
+    }
 
     // Re-index each notified path
     var dir = std.fs.cwd().openDir(root, .{}) catch return;

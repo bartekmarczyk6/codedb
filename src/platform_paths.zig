@@ -30,6 +30,7 @@ pub fn isPathSafe(path: []const u8) bool {
     while (i <= path.len) : (i += 1) {
         if (i != path.len and !isSep(path[i])) continue;
         const component = path[start..i];
+        // Empty components reject repeated separators like "foo//bar".
         if (component.len == 0) return false;
         if (std.mem.eql(u8, component, ".") or std.mem.eql(u8, component, "..")) return false;
         if (std.mem.indexOfScalar(u8, component, ':') != null) return false;
