@@ -72,7 +72,7 @@ async function proxyReleaseBinary(version, assetName) {
   const release = await releaseResp.json();
   let asset = release.assets.find((a) => a.name === assetName);
   if (!asset) {
-    const bare = assetName.replace(/-darwin-arm64|-darwin-x86_64|-linux-arm64|-linux-x86_64/, "");
+    const bare = assetName.replace(/-darwin-arm64|-darwin-x86_64|-linux-arm64|-linux-x86_64|-windows-x86_64\.exe|-windows-arm64\.exe/, "");
     asset = release.assets.find((a) => a.name === bare);
   }
   if (!asset) {

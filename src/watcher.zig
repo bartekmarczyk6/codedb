@@ -1,6 +1,8 @@
 const std = @import("std");
 const Store = @import("store.zig").Store;
 const Explorer = @import("explore.zig").Explorer;
+const builtin = @import("builtin");
+const platform_paths = @import("platform_paths.zig");
 
 pub const EventKind = enum(u8) {
     created,
@@ -452,7 +454,9 @@ fn shouldSkipFile(path: []const u8) bool {
 /// Replicates the filter from snapshot.zig so live indexing and snapshots
 /// apply the same exclusion rules. Optimized: basename check + early exit.
 pub fn isSensitivePath(path: []const u8) bool {
-    const basename = if (std.mem.lastIndexOfScalar(u8, path, '/')) |sep| path[sep + 1 ..] else path;
+    var norm_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const norm = platform_paths.normalizeLower(path, &norm_buf);
+    const basename = if (std.mem.lastIndexOfScalar(u8, norm, '/')) |sep| norm[sep + 1 ..] else norm;
     // Fast path: most source files have extensions like .zig, .ts, .py — none start with '.'
     // or match sensitive patterns. Skip the full check for common cases.
     if (basename.len == 0) return false;
@@ -465,9 +469,9 @@ pub fn isSensitivePath(path: []const u8) bool {
             std.mem.endsWith(u8, basename, ".p12") or
             std.mem.endsWith(u8, basename, ".pfx") or
             std.mem.endsWith(u8, basename, ".jks")) return true;
-        if (std.mem.indexOf(u8, path, ".ssh/") != null or
-            std.mem.indexOf(u8, path, ".gnupg/") != null or
-            std.mem.indexOf(u8, path, ".aws/") != null) return true;
+        if (std.mem.indexOf(u8, norm, ".ssh/") != null or
+            std.mem.indexOf(u8, norm, ".gnupg/") != null or
+            std.mem.indexOf(u8, norm, ".aws/") != null) return true;
         return false;
     }
     // .env* wildcard (catches .env, .env.local, .env.production, etc.)
@@ -485,9 +489,9 @@ pub fn isSensitivePath(path: []const u8) bool {
     if (std.mem.endsWith(u8, basename, ".pem") or
         std.mem.endsWith(u8, basename, ".key") or
         std.mem.endsWith(u8, basename, ".p12")) return true;
-    if (std.mem.indexOf(u8, path, ".ssh/") != null or
-        std.mem.indexOf(u8, path, ".gnupg/") != null or
-        std.mem.indexOf(u8, path, ".aws/") != null) return true;
+    if (std.mem.indexOf(u8, norm, ".ssh/") != null or
+        std.mem.indexOf(u8, norm, ".gnupg/") != null or
+        std.mem.indexOf(u8, norm, ".aws/") != null) return true;
     return false;
 }
 
@@ -521,18 +525,26 @@ fn indexFileContent(explorer: *Explorer, dir: std.fs.Dir, path: []const u8, allo
 // immediately, eliminating the 2s polling delay for muonry-sourced edits.
 
 fn drainNotifyFile(store: *Store, explorer: *Explorer, queue: *EventQueue, known: *FileMap, root: []const u8, alloc: std.mem.Allocator) void {
-    // Atomically read + truncate
-    const notify_path = "/tmp/codedb-notify";
-    const file = std.fs.cwd().openFile(notify_path, .{ .mode = .read_write }) catch return;
+    const notify_path = getNotifyPath(alloc) catch return;
+    defer alloc.free(notify_path);
+
+    const notify_parent = std.fs.path.dirname(notify_path) orelse ".";
+    std.fs.cwd().makePath(notify_parent) catch {};
+
+    const file = std.fs.cwd().openFile(notify_path, .{}) catch return;
     defer file.close();
 
     const data = file.readToEndAlloc(alloc, 64 * 1024) catch return;
     defer alloc.free(data);
     if (data.len == 0) return;
 
-    // Truncate after reading
-    file.seekTo(0) catch return;
-    std.posix.ftruncate(file.handle, 0) catch return;
+    // Clear after reading
+    if (std.fs.cwd().createFile(notify_path, .{ .truncate = true })) |empty| {
+        empty.close();
+    } else |err| {
+        std.log.warn("watcher: failed to truncate notify file {s}: {}", .{ notify_path, err });
+        return;
+    }
 
     // Re-index each notified path
     var dir = std.fs.cwd().openDir(root, .{}) catch return;
@@ -544,8 +556,8 @@ fn drainNotifyFile(store: *Store, explorer: *Explorer, queue: *EventQueue, known
         if (path.len == 0) continue;
 
         // Make path relative to root if it's absolute
-        const rel = if (std.mem.startsWith(u8, path, root))
-            std.mem.trimLeft(u8, path[root.len..], "/")
+        const rel = if (pathStartsWithRoot(path, root))
+            std.mem.trimLeft(u8, path[root.len..], "/\\")
         else
             path;
 
@@ -565,5 +577,48 @@ fn drainNotifyFile(store: *Store, explorer: *Explorer, queue: *EventQueue, known
         if (FsEvent.init(rel, .modified, store.currentSeq())) |ev| {
             _ = queue.push(ev);
         }
+    }
+}
+
+fn pathStartsWithRoot(path: []const u8, root: []const u8) bool {
+    var pbuf: [std.fs.max_path_bytes]u8 = undefined;
+    var rbuf: [std.fs.max_path_bytes]u8 = undefined;
+    const pn = platform_paths.normalizeLower(path, &pbuf);
+    const rn = platform_paths.normalizeLower(root, &rbuf);
+    return std.mem.startsWith(u8, pn, rn);
+}
+
+fn getNotifyPath(allocator: std.mem.Allocator) ![]u8 {
+    if (std.process.getEnvVarOwned(allocator, "CODEDB_NOTIFY_FILE")) |custom| {
+        return custom;
+    } else |_| {}
+
+    if (builtin.os.tag == .windows) {
+        if (std.process.getEnvVarOwned(allocator, "LOCALAPPDATA")) |local| {
+            defer allocator.free(local);
+            return std.fmt.allocPrint(allocator, "{s}/codedb/notify.txt", .{local});
+        } else |_| {}
+        if (std.process.getEnvVarOwned(allocator, "TEMP")) |temp| {
+            defer allocator.free(temp);
+            return std.fmt.allocPrint(allocator, "{s}/codedb-notify.txt", .{temp});
+        } else |_| {}
+        if (std.process.getEnvVarOwned(allocator, "TMP")) |tmp| {
+            defer allocator.free(tmp);
+            return std.fmt.allocPrint(allocator, "{s}/codedb-notify.txt", .{tmp});
+        } else |_| {}
+    }
+
+    return allocator.dupe(u8, "/tmp/codedb-notify");
+}
+
+const testing = std.testing;
+
+test "issue-91: getNotifyPath fallback is stable" {
+    const path = try getNotifyPath(testing.allocator);
+    defer testing.allocator.free(path);
+    if (builtin.os.tag == .windows) {
+        try testing.expect(path.len > 0);
+    } else {
+        try testing.expectEqualStrings("/tmp/codedb-notify", path);
     }
 }

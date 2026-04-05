@@ -32,6 +32,8 @@ const SymbolKind = explore.SymbolKind;
 const mcp_mod = @import("mcp.zig");
 const snapshot_mod = @import("snapshot.zig");
 const telemetry_mod = @import("telemetry.zig");
+const root_policy = @import("root_policy.zig");
+const platform_paths = @import("platform_paths.zig");
 // ── Store tests ─────────────────────────────────────────────
 
 test "store: record and retrieve snapshots" {
@@ -4141,9 +4143,37 @@ test "issue-93: isPathSafe blocks traversal" {
     const MCP = @import("mcp.zig");
     try testing.expect(!MCP.isPathSafe("../../../etc/passwd"));
     try testing.expect(!MCP.isPathSafe("/etc/passwd"));
+    try testing.expect(!MCP.isPathSafe("C:/Windows/System32/drivers/etc/hosts"));
+    try testing.expect(!MCP.isPathSafe("C:\\Windows\\System32\\drivers\\etc\\hosts"));
+    try testing.expect(!MCP.isPathSafe("\\\\server\\share\\secret.txt"));
+    try testing.expect(!MCP.isPathSafe("foo\\..\\secret.txt"));
+    try testing.expect(!MCP.isPathSafe("foo/./bar"));
+    try testing.expect(!MCP.isPathSafe("foo//bar"));
     try testing.expect(!MCP.isPathSafe(""));
+    const with_null = [_]u8{ 'n', 'u', 'l', 0, 'b', 'y', 't', 'e' };
+    try testing.expect(!MCP.isPathSafe(with_null[0..]));
     try testing.expect(MCP.isPathSafe("src/main.zig"));
     try testing.expect(MCP.isPathSafe("README.md"));
+    try testing.expect(MCP.isPathSafe("src\\main.zig"));
+}
+
+test "issue-91: sensitive path filter handles windows separators and case" {
+    try testing.expect(watcher.isSensitivePath(".SSH\\known_hosts"));
+    try testing.expect(watcher.isSensitivePath("Users\\me\\.AWS\\credentials"));
+    try testing.expect(watcher.isSensitivePath("Config\\SECRETS.YML"));
+    try testing.expect(watcher.isSensitivePath("keys\\Server.PEM"));
+    try testing.expect(!watcher.isSensitivePath("src\\Main.ZIG"));
+}
+
+test "issue-91: normalizeRelativePath normalizes separators" {
+    const normalized = try platform_paths.normalizeRelativePath(testing.allocator, "src\\main.zig");
+    defer testing.allocator.free(normalized);
+    try testing.expectEqualStrings("src/main.zig", normalized);
+}
+
+test "issue-91: root policy rejects windows temp roots and drive roots" {
+    try testing.expect(!root_policy.isIndexableRoot("C:/"));
+    try testing.expect(!root_policy.isIndexableRoot("C:\\Users\\dev\\AppData\\Local\\Temp\\repo"));
 }
 
 test "issue-111: Python triple-quote docstrings not parsed as code" {

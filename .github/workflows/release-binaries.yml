@@ -39,6 +39,16 @@ jobs:
             asset_name: codedb-linux-x86_64
             zig_archive: zig-x86_64-linux-0.15.2.tar.xz
             zig_dir: zig-x86_64-linux-0.15.2
+          - runner: ubuntu-24.04
+            zig_target: x86_64-windows
+            asset_name: codedb-windows-x86_64.exe
+            zig_archive: zig-x86_64-linux-0.15.2.tar.xz
+            zig_dir: zig-x86_64-linux-0.15.2
+          - runner: ubuntu-24.04
+            zig_target: aarch64-windows
+            asset_name: codedb-windows-arm64.exe
+            zig_archive: zig-x86_64-linux-0.15.2.tar.xz
+            zig_dir: zig-x86_64-linux-0.15.2
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
       APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
@@ -91,7 +101,11 @@ jobs:
             codesign_arg=(-Dcodesign-identity="${CODEDB_CODESIGN_IDENTITY:-"-"}")
           fi
           zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.zig_target }} "${codesign_arg[@]}"
-          cp zig-out/bin/codedb "${{ matrix.asset_name }}"
+          bin_path="zig-out/bin/codedb"
+          if [[ "${{ matrix.zig_target }}" == *"-windows" ]]; then
+            bin_path="zig-out/bin/codedb.exe"
+          fi
+          cp "$bin_path" "${{ matrix.asset_name }}"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

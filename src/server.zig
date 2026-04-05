@@ -5,6 +5,7 @@ const Explorer = @import("explore.zig").Explorer;
 const snapshot_json = @import("snapshot_json.zig");
 const watcher = @import("watcher.zig");
 const edit_mod = @import("edit.zig");
+const platform_paths = @import("platform_paths.zig");
 
 pub fn serve(
     allocator: std.mem.Allocator,
@@ -147,7 +148,12 @@ fn handleConnection(
             respondJson(conn, "400 Bad Request", "{\"error\":\"missing ?path=\"}");
             return;
         };
-        const got = agents.tryLock(agent_id, path, 30_000) catch {
+        const norm_path = platform_paths.normalizeRelativePath(allocator, path) catch {
+            respondJson(conn, "403 Forbidden", "{\"error\":\"path traversal not allowed\"}");
+            return;
+        };
+        defer allocator.free(norm_path);
+        const got = agents.tryLock(agent_id, norm_path, 30_000) catch {
             respondJson(conn, "500 Internal Server Error", "{\"error\":\"lock failed\"}");
             return;
         };
@@ -169,7 +175,12 @@ fn handleConnection(
             respondJson(conn, "400 Bad Request", "{\"error\":\"missing ?path=\"}");
             return;
         };
-        agents.releaseLock(agent_id, path);
+        const norm_path = platform_paths.normalizeRelativePath(allocator, path) catch {
+            respondJson(conn, "403 Forbidden", "{\"error\":\"path traversal not allowed\"}");
+            return;
+        };
+        defer allocator.free(norm_path);
+        agents.releaseLock(agent_id, norm_path);
         respondJson(conn, "200 OK", "{\"unlocked\":true}");
         return;
     }
@@ -196,8 +207,13 @@ fn handleConnection(
             respondJson(conn, "400 Bad Request", "{\"error\":\"missing path\"}");
             return;
         };
-        if (!isPathSafe(path)) {
+        const norm_path = platform_paths.normalizeRelativePath(allocator, path) catch {
             respondJson(conn, "403 Forbidden", "{\"error\":\"path traversal not allowed\"}");
+            return;
+        };
+        defer allocator.free(norm_path);
+        if (watcher.isSensitivePath(norm_path)) {
+            respondJson(conn, "403 Forbidden", "{\"error\":\"access to sensitive file blocked\"}");
             return;
         }
 
@@ -231,7 +247,7 @@ fn handleConnection(
         const after = jsonU64(body_obj, "after");
 
         var req = edit_mod.EditRequest{
-            .path = path,
+            .path = norm_path,
             .agent_id = agent_id,
             .op = op,
             .content = content,
@@ -269,11 +285,16 @@ fn handleConnection(
             respondJson(conn, "400 Bad Request", "{\"error\":\"missing ?path=\"}");
             return;
         };
-        if (!isPathSafe(path)) {
+        const norm_path = platform_paths.normalizeRelativePath(allocator, path) catch {
             respondJson(conn, "403 Forbidden", "{\"error\":\"path traversal not allowed\"}");
             return;
+        };
+        defer allocator.free(norm_path);
+        if (watcher.isSensitivePath(norm_path)) {
+            respondJson(conn, "403 Forbidden", "{\"error\":\"access to sensitive file blocked\"}");
+            return;
         }
-        const file = std.fs.cwd().openFile(path, .{}) catch {
+        const file = std.fs.cwd().openFile(norm_path, .{}) catch {
             respondJson(conn, "404 Not Found", "{\"error\":\"file not found\"}");
             return;
         };
@@ -289,7 +310,7 @@ fn handleConnection(
         defer out.deinit(allocator);
         const w = out.writer(allocator);
         w.writeAll("{\"path\":\"") catch return;
-        writeJsonEscaped(w, path) catch return;
+        writeJsonEscaped(w, norm_path) catch return;
         w.print("\",\"size\":{d},\"content\":\"", .{content.len}) catch return;
         writeJsonEscaped(w, content) catch return;
         w.writeAll("\"}") catch return;
@@ -352,11 +373,12 @@ fn handleConnection(
             return;
         };
         defer allocator.free(path);
-        if (!isPathSafe(path)) {
+        const norm_path = platform_paths.normalizeRelativePath(allocator, path) catch {
             respondJson(conn, "403 Forbidden", "{\"error\":\"path traversal not allowed\"}");
             return;
-        }
-        var outline = explorer.getOutline(path, allocator) catch {
+        };
+        defer allocator.free(norm_path);
+        var outline = explorer.getOutline(norm_path, allocator) catch {
             respondJson(conn, "500 Internal Server Error", "{\"error\":\"outline failed\"}");
             return;
         } orelse {
@@ -464,7 +486,12 @@ fn handleConnection(
             return;
         };
         defer allocator.free(path);
-        const imported_by = explorer.getImportedBy(path, allocator) catch {
+        const norm_path = platform_paths.normalizeRelativePath(allocator, path) catch {
+            respondJson(conn, "403 Forbidden", "{\"error\":\"path traversal not allowed\"}");
+            return;
+        };
+        defer allocator.free(norm_path);
+        const imported_by = explorer.getImportedBy(norm_path, allocator) catch {
             respondJson(conn, "500 Internal Server Error", "{\"error\":\"deps failed\"}");
             return;
         };
@@ -477,7 +504,7 @@ fn handleConnection(
         defer out.deinit(allocator);
         const w = out.writer(allocator);
         w.writeAll("{\"path\":\"") catch return;
-        writeJsonEscaped(w, path) catch return;
+        writeJsonEscaped(w, norm_path) catch return;
         w.writeAll("\",\"imported_by\":[") catch return;
         for (imported_by, 0..) |dep, i| {
             if (i > 0) w.writeAll(",") catch return;
@@ -586,16 +613,6 @@ fn handleConnection(
 }
 
 // ── Response helpers ────────────────────────────────────────
-
-fn isPathSafe(path: []const u8) bool {
-    if (path.len == 0) return false;
-    if (path[0] == '/') return false;
-    var it = std.mem.splitScalar(u8, path, '/');
-    while (it.next()) |component| {
-        if (std.mem.eql(u8, component, "..")) return false;
-    }
-    return true;
-}
 
 fn respondJson(conn: std.net.Server.Connection, status: []const u8, body: []const u8) void {
     var hdr_buf: [512]u8 = undefined;

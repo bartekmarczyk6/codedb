@@ -24,7 +24,7 @@ fn page() h.Node {
         h.pre(.{},
             \\curl -fsSL https://codedb.codegraff.com/install.sh | sh
         ),
-        h.p(.{}, "Supports macOS (ARM64, x86_64) and Linux (ARM64, x86_64). macOS binaries are codesigned and notarized."),
+        h.p(.{}, "Supports macOS (ARM64, x86_64), Linux (ARM64, x86_64), and Windows (ARM64, x86_64). macOS binaries are codesigned and notarized."),
 
         h.h2(.{}, "2. MCP server (recommended)"),
         h.p(.{}, "After installing, codedb is automatically registered. Open any project and the 16 MCP tools are available to your AI agent."),

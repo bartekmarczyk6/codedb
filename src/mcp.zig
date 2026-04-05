@@ -18,6 +18,7 @@ const idx = @import("index.zig");
 const snapshot_mod = @import("snapshot.zig");
 const telemetry_mod = @import("telemetry.zig");
 const root_policy = @import("root_policy.zig");
+const platform_paths = @import("platform_paths.zig");
 // ── Project cache ────────────────────────────────────────────────────────────
 
 const ProjectCtx = struct {
@@ -106,13 +107,9 @@ const ProjectCache = struct {
         };
 
         if (!snapshot_mod.loadSnapshot(snap_path, &new_entry.explorer, &new_entry.store, self.alloc)) {
-            // Fallback: try central store at ~/.codedb/projects/{hash}/codedb.snapshot
-            const hash = std.hash.Wyhash.hash(0, p);
-            var central_buf: [std.fs.max_path_bytes]u8 = undefined;
             const loaded_central = blk: {
-                const home = std.process.getEnvVarOwned(self.alloc, "HOME") catch break :blk false;
-                defer self.alloc.free(home);
-                const central = std.fmt.bufPrint(&central_buf, "{s}/.codedb/projects/{x}/codedb.snapshot", .{ home, hash }) catch break :blk false;
+                const central = platform_paths.getCentralSnapshotPath(self.alloc, p) catch break :blk false;
+                defer self.alloc.free(central);
                 break :blk snapshot_mod.loadSnapshot(central, &new_entry.explorer, &new_entry.store, self.alloc);
             };
             if (!loaded_central) {
@@ -616,10 +613,15 @@ fn handleTree(alloc: std.mem.Allocator, out: *std.ArrayList(u8), explorer: *Expl
 }
 
 fn handleOutline(alloc: std.mem.Allocator, args: *const std.json.ObjectMap, out: *std.ArrayList(u8), explorer: *Explorer) void {
-    const path = getStr(args, "path") orelse {
+    const path_raw = getStr(args, "path") orelse {
         out.appendSlice(alloc, "error: missing 'path' argument") catch {};
         return;
     };
+    const path = platform_paths.normalizeRelativePath(alloc, path_raw) catch {
+        out.appendSlice(alloc, "error: path traversal not allowed") catch {};
+        return;
+    };
+    defer alloc.free(path);
     const compact = getBool(args, "compact");
     var outline = explorer.getOutline(path, alloc) catch {
         out.appendSlice(alloc, "error: outline retrieval failed") catch {};
@@ -779,10 +781,15 @@ fn handleHot(alloc: std.mem.Allocator, args: *const std.json.ObjectMap, out: *st
 }
 
 fn handleDeps(alloc: std.mem.Allocator, args: *const std.json.ObjectMap, out: *std.ArrayList(u8), explorer: *Explorer) void {
-    const path = getStr(args, "path") orelse {
+    const path_raw = getStr(args, "path") orelse {
         out.appendSlice(alloc, "error: missing 'path' argument") catch {};
         return;
     };
+    const path = platform_paths.normalizeRelativePath(alloc, path_raw) catch {
+        out.appendSlice(alloc, "error: path traversal not allowed") catch {};
+        return;
+    };
+    defer alloc.free(path);
     const imported_by = explorer.getImportedBy(path, alloc) catch {
         out.appendSlice(alloc, "error: deps failed") catch {};
         return;
@@ -804,14 +811,15 @@ fn handleDeps(alloc: std.mem.Allocator, args: *const std.json.ObjectMap, out: *s
 }
 
 fn handleRead(alloc: std.mem.Allocator, args: *const std.json.ObjectMap, out: *std.ArrayList(u8), explorer: *Explorer) void {
-    const path = getStr(args, "path") orelse {
+    const path_raw = getStr(args, "path") orelse {
         out.appendSlice(alloc, "error: missing 'path' argument") catch {};
         return;
     };
-    if (!isPathSafe(path)) {
+    const path = platform_paths.normalizeRelativePath(alloc, path_raw) catch {
         out.appendSlice(alloc, "error: path traversal not allowed") catch {};
         return;
-    }
+    };
+    defer alloc.free(path);
     if (watcher.isSensitivePath(path)) {
         out.appendSlice(alloc, "error: access to sensitive file blocked") catch {};
         return;
@@ -877,14 +885,15 @@ fn handleRead(alloc: std.mem.Allocator, args: *const std.json.ObjectMap, out: *s
 }
 
 fn handleEdit(alloc: std.mem.Allocator, args: *const std.json.ObjectMap, out: *std.ArrayList(u8), store: *Store, explorer: *Explorer, agents: *AgentRegistry) void {
-    const path = getStr(args, "path") orelse {
+    const path_raw = getStr(args, "path") orelse {
         out.appendSlice(alloc, "error: missing 'path'") catch {};
         return;
     };
-    if (!isPathSafe(path)) {
+    const path = platform_paths.normalizeRelativePath(alloc, path_raw) catch {
         out.appendSlice(alloc, "error: path traversal not allowed") catch {};
         return;
-    }
+    };
+    defer alloc.free(path);
     if (watcher.isSensitivePath(path)) {
         out.appendSlice(alloc, "error: access to sensitive file blocked") catch {};
         return;
@@ -1156,13 +1165,9 @@ fn handleRemote(alloc: std.mem.Allocator, args: *const std.json.ObjectMap, out: 
 // ── Local project tools ─────────────────────────────────────────────────────
 
 fn handleProjects(alloc: std.mem.Allocator, out: *std.ArrayList(u8)) void {
-    const home = std.process.getEnvVarOwned(alloc, "HOME") catch {
-        out.appendSlice(alloc, "error: cannot read HOME") catch {};
-        return;
-    };
-    defer alloc.free(home);
-
-    const projects_dir = std.fmt.allocPrint(alloc, "{s}/.codedb/projects", .{home}) catch {
+    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const cwd_abs = std.fs.cwd().realpath(".", &cwd_buf) catch ".";
+    const projects_dir = platform_paths.getProjectsDir(alloc, cwd_abs) catch {
         out.appendSlice(alloc, "error: alloc failed") catch {};
         return;
     };
@@ -1282,17 +1287,7 @@ fn handleIndex(alloc: std.mem.Allocator, args: *const std.json.ObjectMap, out: *
 }
 
 pub fn isPathSafe(path: []const u8) bool {
-    if (path.len == 0) return false;
-    if (path[0] == '/') return false;
-    // Block null bytes (path truncation attack)
-    if (std.mem.indexOfScalar(u8, path, 0) != null) return false;
-    // Block backslash separators
-    if (std.mem.indexOfScalar(u8, path, '\\') != null) return false;
-    var it = std.mem.splitScalar(u8, path, '/');
-    while (it.next()) |component| {
-        if (std.mem.eql(u8, component, "..")) return false;
-    }
-    return true;
+    return platform_paths.isPathSafe(path);
 }
 
 fn writeResult(alloc: std.mem.Allocator, stdout: std.fs.File, id: ?std.json.Value, result: []const u8) void {

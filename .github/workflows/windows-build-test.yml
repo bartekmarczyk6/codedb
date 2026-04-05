@@ -1,0 +1,32 @@
+name: windows-build-test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://ziglang.org/download/0.15.2/zig-windows-x86_64-0.15.2.zip" -OutFile "zig.zip"
+          Expand-Archive zig.zip -DestinationPath .
+          Add-Content -Path $env:GITHUB_PATH -Value "$PWD\zig-windows-x86_64-0.15.2"
+
+      - name: Build
+        shell: pwsh
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Test
+        shell: pwsh
+        run: zig build test
+

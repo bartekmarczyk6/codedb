@@ -1,15 +1,20 @@
 const GITHUB_REPO = "justrach/codedb";
 const FALLBACK_VERSION = "0.2.53";
 const INSTALL_SCRIPT_URL = `https://raw.githubusercontent.com/${GITHUB_REPO}/main/install/install.sh`;
+const INSTALL_SCRIPT_PS_URL = `https://raw.githubusercontent.com/${GITHUB_REPO}/main/install/install.ps1`;
 
 export default {
   async fetch(request) {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // GET / or /install.sh → serve the install script
+    // GET / or /install.sh → serve the shell install script
     if (path === "/" || path === "/install.sh") {
       return serveInstallScript();
+    }
+    // GET /install.ps1 → serve the PowerShell install script
+    if (path === "/install.ps1") {
+      return serveInstallScriptPs1();
     }
 
     // GET /latest.json → fetch latest release from GitHub
@@ -31,12 +36,31 @@ export default {
 async function serveInstallScript() {
   // Fetch install.sh from the repo (always up to date)
   const resp = await fetch(
-    `https://raw.githubusercontent.com/${GITHUB_REPO}/main/install/install.sh`,
+    INSTALL_SCRIPT_URL,
     { headers: { "User-Agent": "codedb-worker" } }
   );
 
   if (!resp.ok) {
     return new Response("failed to fetch install script", { status: 502 });
+  }
+
+  const body = await resp.text();
+  return new Response(body, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "public, max-age=300",
+    },
+  });
+}
+
+async function serveInstallScriptPs1() {
+  const resp = await fetch(
+    INSTALL_SCRIPT_PS_URL,
+    { headers: { "User-Agent": "codedb-worker" } }
+  );
+
+  if (!resp.ok) {
+    return new Response("failed to fetch powershell install script", { status: 502 });
   }
 
   const body = await resp.text();
@@ -89,12 +113,12 @@ async function proxyReleaseBinary(version, assetName) {
   const release = await releaseResp.json();
 
   // Find the matching asset
-  // Asset names on GitHub: "codedb-darwin-arm64", "codedb-linux-x86_64", etc.
+  // Asset names on GitHub: "codedb-darwin-arm64", "codedb-linux-x86_64", "codedb-windows-x86_64.exe", etc.
   // If the release just has "codedb" (no platform suffix), try exact match first then bare name
   let asset = release.assets.find((a) => a.name === assetName);
   if (!asset) {
     // Fallback: if only "codedb" exists in release, map to it
-    const bare = assetName.replace(/-darwin-arm64|-darwin-x86_64|-linux-arm64|-linux-x86_64/, "");
+    const bare = assetName.replace(/-darwin-arm64|-darwin-x86_64|-linux-arm64|-linux-x86_64|-windows-x86_64\.exe|-windows-arm64\.exe/, "");
     asset = release.assets.find((a) => a.name === bare);
   }
 
