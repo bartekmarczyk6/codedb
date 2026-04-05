@@ -50,7 +50,7 @@ pub fn normalizeRelativePath(allocator: std.mem.Allocator, path: []const u8) ![]
 }
 
 pub fn normalizeLower(path: []const u8, buf: *[std.fs.max_path_bytes]u8) []const u8 {
-    if (path.len > buf.len) return "";
+    if (path.len > buf.len) return path;
     for (path, 0..) |c, i| {
         const mapped = if (c == '\\') '/' else c;
         buf[i] = std.ascii.toLower(mapped);

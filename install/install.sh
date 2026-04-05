@@ -196,7 +196,7 @@ main() {
   if curl -fsSL -A 'codedb-installer' "$url" -o "$tmp" 2>/dev/null; then
     # Verify checksum if available (#120)
     local expected_hash
-    expected_hash="$(curl -fsSL -A 'codedb-installer' "$checksum_url" 2>/dev/null | grep -E "^[0-9a-fA-F]+[[:space:]]+codedb-${platform}${ext}$" | awk '{print $1}')"
+    expected_hash="$(curl -fsSL -A 'codedb-installer' "$checksum_url" 2>/dev/null | grep " codedb-${platform}${ext}$" | awk '{print $1}')"
     if [ -z "$expected_hash" ]; then
       rm -f "$tmp"
       printf "${R}failed${N}\n"

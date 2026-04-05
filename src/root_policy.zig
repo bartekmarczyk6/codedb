@@ -12,10 +12,17 @@ fn isWindowsDriveRoot(path: []const u8) bool {
     return is_alpha and path[1] == ':' and (path[2] == '/' or path[2] == '\\');
 }
 
-fn hasPathSegment(path: []const u8, segment: []const u8) bool {
-    var it = std.mem.splitScalar(u8, path, '/');
-    while (it.next()) |part| {
-        if (std.mem.eql(u8, part, segment)) return true;
+fn isWindowsUserTempPath(path: []const u8) bool {
+    if (path.len < 4 or !((path[0] >= 'a' and path[0] <= 'z') or (path[0] >= 'A' and path[0] <= 'Z')) or path[1] != ':' or path[2] != '/') {
+        return false;
+    }
+    const rest = path[3..];
+    const target = "appdata/local/temp";
+    if (std.mem.indexOf(u8, rest, target)) |idx| {
+        if (idx == 0 or rest[idx - 1] == '/') {
+            const end = idx + target.len;
+            if (end == rest.len or rest[end] == '/') return true;
+        }
     }
     return false;
 }
@@ -26,8 +33,8 @@ pub fn isIndexableRoot(path: []const u8) bool {
     const norm = platform_paths.normalizeLower(path, &norm_buf);
     if (isWindowsDriveRoot(norm)) return false;
     if (std.mem.startsWith(u8, norm, "//")) return false;
-    if (hasPathSegment(norm, "appdata") and hasPathSegment(norm, "local") and hasPathSegment(norm, "temp")) return false;
-    if (hasPathSegment(norm, "windows") and hasPathSegment(norm, "temp")) return false;
+    if (isWindowsUserTempPath(norm)) return false;
+    if (isExactOrChild(norm, "c:/windows/temp")) return false;
 
     if (std.mem.eql(u8, norm, "/")) return false;
     if (isExactOrChild(norm, "/private/tmp")) return false;
@@ -59,4 +66,9 @@ test "issue-80: normal paths are allowed" {
 test "issue-91: windows temp roots are denied" {
     try testing.expect(!isIndexableRoot("C:/Users/dev/AppData/Local/Temp/repo"));
     try testing.expect(!isIndexableRoot("c:\\users\\dev\\appdata\\local\\temp\\repo"));
+    try testing.expect(!isIndexableRoot("C:/Windows/Temp/repo"));
+}
+
+test "issue-91: windows non-temp lookalike path is allowed" {
+    try testing.expect(isIndexableRoot("C:/projects/myappdata/local/temp-files/repo"));
 }
