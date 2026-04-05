@@ -128,3 +128,19 @@ test "issue-91: normalizeRelativePath converts backslashes" {
     defer testing.allocator.free(p);
     try testing.expectEqualStrings("a/b/c.txt", p);
 }
+
+test "issue-91: project data dir and snapshot paths are built consistently" {
+    const root = "/tmp/codedb-test-root";
+    const projects_dir = try getProjectsDir(testing.allocator, root);
+    defer testing.allocator.free(projects_dir);
+    try testing.expect(std.mem.endsWith(u8, projects_dir, "/projects"));
+
+    const data_dir = try getProjectDataDir(testing.allocator, root);
+    defer testing.allocator.free(data_dir);
+    try testing.expect(std.mem.startsWith(u8, data_dir, projects_dir));
+
+    const snap_path = try getCentralSnapshotPath(testing.allocator, root);
+    defer testing.allocator.free(snap_path);
+    try testing.expect(std.mem.startsWith(u8, snap_path, data_dir));
+    try testing.expect(std.mem.endsWith(u8, snap_path, "/codedb.snapshot"));
+}

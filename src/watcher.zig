@@ -607,3 +607,15 @@ fn getNotifyPath(allocator: std.mem.Allocator) ![]u8 {
 
     return allocator.dupe(u8, "/tmp/codedb-notify");
 }
+
+const testing = std.testing;
+
+test "issue-91: getNotifyPath fallback is stable" {
+    const path = try getNotifyPath(testing.allocator);
+    defer testing.allocator.free(path);
+    if (builtin.os.tag == .windows) {
+        try testing.expect(path.len > 0);
+    } else {
+        try testing.expectEqualStrings("/tmp/codedb-notify", path);
+    }
+}
